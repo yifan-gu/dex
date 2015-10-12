@@ -17,6 +17,8 @@ import (
 	pflag "github.com/coreos/dex/pkg/flag"
 	phttp "github.com/coreos/dex/pkg/http"
 	"github.com/coreos/dex/pkg/log"
+	"github.com/coreos/go-oidc/jose"
+	"github.com/coreos/go-oidc/oauth2"
 	"github.com/coreos/go-oidc/oidc"
 )
 
@@ -108,6 +110,9 @@ func main() {
 		ProviderConfig: cfg,
 		Credentials:    cc,
 		RedirectURL:    *redirectURL,
+		// Specify the scope in the client so the server knows it needs
+		// to return a refresh token.
+		Scope: []string{"offline_access", "openid"},
 	}
 
 	client, err := oidc.NewClient(ccfg)
@@ -233,10 +238,19 @@ func handleCallbackFunc(c *oidc.Client) http.HandlerFunc {
 			return
 		}
 
-		tok, err := c.ExchangeAuthCode(code)
+		oac, err := c.OAuthClient()
 		if err != nil {
-			phttp.WriteError(w, http.StatusBadRequest, fmt.Sprintf("unable to verify auth code with issuer: %v", err))
-			return
+			panic("")
+		}
+
+		t, err := oac.RequestToken(oauth2.GrantTypeAuthCode, code)
+		if err != nil {
+			panic("")
+		}
+
+		tok, err := jose.ParseJWT(t.IDToken)
+		if err != nil {
+			panic("")
 		}
 
 		claims, err := tok.Claims()
@@ -245,9 +259,9 @@ func handleCallbackFunc(c *oidc.Client) http.HandlerFunc {
 			return
 		}
 
-		s := fmt.Sprintf(`<html><body><p>Token: %v</p><p>Claims: %v </p>
+		s := fmt.Sprintf(`<html><body><p>Token: %v</p><p>RefreshToken: %v</p><p>Claims: %v </p>
         <a href="/resend?jwt=%s">Resend Verification Email</a>
-</body></html>`, tok.Encode(), claims, tok.Encode())
+</body></html>`, tok.Encode(), t.RefreshToken, claims, tok.Encode())
 		w.Write([]byte(s))
 	}
 }
